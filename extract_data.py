@@ -10,6 +10,8 @@ import pickle
 PATH = 'ISIC-images' 
 OUTFILE = 'cleaned_data.pkl'
 
+valid_labels = ['benign','malignant','indeterminate']
+
 def return_filenames(path = PATH):
     '''
     Returns the filenames of all of the images and json 
@@ -49,7 +51,9 @@ def clean_data(pic_filenames):
         json_file = pic_file.replace('.jpg', '.json')
         try:   
             curr_data = json.loads(open(json_file).read())
-            data.append((pic_file,curr_data['meta']['clinical']['benign_malignant']))
+            curr_label = curr_data['meta']['clinical']['benign_malignant']
+            if curr_label in valid_labels:
+                data.append((pic_file,curr_label))
         except:
             #print('Could not load in image: ', pic_file)
             continue 
