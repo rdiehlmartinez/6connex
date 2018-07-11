@@ -16,11 +16,12 @@ from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler, RandomSampler
 import torch.nn.functional as F
 import numpy as np
+import argparse
 
 
 class Model(): 
-    def __init__(self,dtype = torch.float32, device = torch.device('cpu')): 
-         """
+    def __init__(self, lr, batchsize, verbose, dtype = torch.float32): 
+        """
         Model to initialize the training of the convolutional neural network. 
         @ Arguments: 
             dtype: type of the values used in the model 
@@ -30,10 +31,9 @@ class Model():
         # Config Training
         self.dtype = dtype
         self.num_epochs = 30
-        self.lr = 1e-2
-        self.device = device 
-        self.gpu = False 
+        self.lr = lr
         self.batch_size = 128
+        self.verbose = verbose # Boolean 
         
         # Split Between Training and Validation Datasets
         self.split_prop = 0.9
@@ -44,7 +44,7 @@ class Model():
         # Initialize CNN Model
         self.model = ClassificationModel(num_outputs=self.num_outputs)
 
-        if (self.gpu and torch.cuda.is_available()):
+        if (torch.cuda.is_available()):
             num_GPUs = torch.cuda.device_count()
             print("Targeting {} GPU(s)".format(num_GPUs))
             self.device = torch.device('cuda:0')
@@ -52,10 +52,9 @@ class Model():
             if (num_GPUs > 1):
                 self.model = nn.DataParallel(self.model)
         else:
-            if (self.gpu):
-                print("CUDA Not Available")
+            print("CUDA Not Available")
             print("Targeting CPU")
-            self.device = torch.device('cpu')
+            self.device = torch.device('cpu')                  
             
     def trainable_parameters(self):
         return sum(parameter.numel() for parameter in self.model.parameters() if parameter.requires_grad)
@@ -74,6 +73,11 @@ class Model():
             sampler = SubsetRandomSampler(np.arange(self.split_index))
         batcher = DataLoader(dataset,sampler=sampler,batch_size=self.batch_size)
         return batcher
+
+    def normalize_batch(self, inputs):
+        inputs -= inputs.mean(dim=1)
+        inputs /= inputs.std(dim=1)
+        return inputs
         
     def train(self, eval = True):
         """
@@ -89,6 +93,7 @@ class Model():
         """
         
         self.model = self.model.to(device = self.device)
+
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),lr=self.lr)
         dataset = self.get_dataset()
         training_batcher = self.get_batcher(dataset)
@@ -103,20 +108,21 @@ class Model():
         for epoch in range(self.num_epochs):
             print("Entering epoch number: {}".format(epoch))
             avg_loss = torch.tensor([0.0]).to(device=self.device)
-
             self.model = self.model.train() 
+            
             for iteration, batch in enumerate(training_batcher):
-                
                 global_iteration += 1 
-                
-                inputs, labels = batch
-                
-                # Normalizing Inputs over Batch 
-                
+                inputs, labels = batch 
+
+                #with torch.no_grad():
+                #    normalized_inputs = normalize_batch(inputs)
+
                 optimizer.zero_grad()
-                outputs = self.model(inputs)
+                outputs = self.model(normalized_inputs)
                 
                 loss = (torch.nn.CrossEntropyLoss().to(device = self.device))(outputs, labels)
+                self.accuracy(outputs,loss)
+                exit()
                 loss.backward()
                 optimizer.step()
 
@@ -154,7 +160,6 @@ class Model():
         @returns
         A tensor of size (N, 3), representing the predicted label
         """
-
         model = self.model.to(device = self.device)
         input = input.to(device=self.device,dtype=self.dtype)
         predictions = model(input)
@@ -162,7 +167,13 @@ class Model():
 
 
 def main():
-    model = Model()
+    parser = argparse.ArgumentParser(description='Run the model.')
+    parser.add_argument('lr', type=float, nargs=None, help='initial learning rate for model', metavar='initial learning rate')
+    parser.add_argument('batch_size', type=int, nargs=None, help='batch size for model', metavar='batch size')
+    parser.add_argument("-v", "--verbose", help='show more info', action="store_true")
+    args = parser.parse_args()
+    
+    model = Model(args.lr, args.batch_size, args.verbose)
     model.train()
 
 if __name__ == '__main__':
