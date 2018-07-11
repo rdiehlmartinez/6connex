@@ -55,7 +55,6 @@ def clean_data(pic_filenames):
             if curr_label in valid_labels:
                 data.append((pic_file,curr_label))
         except:
-            #print('Could not load in image: ', pic_file)
             continue 
     return data
         
