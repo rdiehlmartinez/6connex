@@ -15,18 +15,18 @@ from torch.utils.data import DataLoader
 from torch.utils.data.sampler import RandomSampler
 import torch.nn.functional as F
 import numpy as np
+import argparse
 
 
 class Model(): 
-    def __init__(self,dtype = torch.float32, device = torch.device('cpu')): 
+    def __init__(self, lr_in, batchsize_in, dtype = torch.float32, device = torch.device('cpu')): 
         
         # Config Training
         self.dtype = dtype
         self.num_epochs = 30
-        self.lr = 1e-2
-        self.device = device 
-        self.gpu = False 
-        self.batch_size = 128
+        self.lr = lr_in                        
+        self.device = device                        
+        self.batch_size = batchsize_in
 
         # Config Model
         self.num_outputs = 3
@@ -34,7 +34,7 @@ class Model():
         # Initialize CNN Model
         self.model = ClassificationModel(num_outputs=self.num_outputs)
 
-        if (self.gpu and torch.cuda.is_available()):
+        if (torch.cuda.is_available()):
             num_GPUs = torch.cuda.device_count()
             print("Targeting {} GPU(s)".format(num_GPUs))
             self.device = torch.device('cuda:0')
@@ -42,10 +42,9 @@ class Model():
             if (num_GPUs > 1):
                 self.model = nn.DataParallel(self.model)
         else:
-            if (self.gpu):
-                print("CUDA Not Available")
+            print("CUDA Not Available")
             print("Targeting CPU")
-            self.device = torch.device('cpu')
+            self.device = torch.device('cpu')                  
             
     def trainable_parameters(self):
         return sum(parameter.numel() for parameter in self.model.parameters() if parameter.requires_grad)
@@ -60,9 +59,14 @@ class Model():
         sampler = RandomSampler(dataset)
         batcher = DataLoader(dataset,sampler=sampler,batch_size=self.batch_size)
         return batcher
+
+    def normalize_batch(self, inputs):
+        inputs -= inputs.mean(dim=1)
+        inputs /= inputs.std(dim=1)
+        return inputs
         
     def train(self):
-        self.model = self.model.to(device = self.device)
+        self.model = self.model.to(device = self.device)              #wat
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),lr=self.lr)
         dataset, N = self.get_dataset()
         training_batcher = self.get_batcher(dataset)
@@ -76,7 +80,7 @@ class Model():
             for iteration, batch in enumerate(training_batcher):
                 
                 ''' 
-                # Uncomment to check size of batches 
+                Uncomment to check size of batches 
                 print(len(batch))
                 print(batch[0].shape)
                 print(batch[1].shape)
@@ -86,9 +90,13 @@ class Model():
                 
                 global_iteration += 1 
                 
-                inputs, labels = batch
+                inputs, labels = batch 
+
+                with torch.no_grad():
+                    normalized_inputs = normalize_batch(inputs)
+
                 optimizer.zero_grad()
-                outputs = self.model(inputs)
+                outputs = self.model(normalized_inputs)
                 
                 loss = (torch.nn.CrossEntropyLoss().to(device = self.device))(outputs, labels)
                 loss.backward()
@@ -102,7 +110,14 @@ class Model():
 
 
 def main():
-    model = Model()
+    parser = argparse.ArgumentParser(description='Run the model.')
+    parser.add_argument('lr', type=float, nargs=None, help='initial learning rate for model', metavar='initial learning rate')
+    parser.add_argument('batch_size', type=int, nargs=None, help='batch size for model', metavar='batch size')
+    parser.add_argument("-v", "--verbose", help='show more info', action="store_true")
+
+    args = parser.parse_args()
+    verbose = args.verbose
+    model = Model(args.lr, args.batch_size)
     model.train()
 
 if __name__ == '__main__':
