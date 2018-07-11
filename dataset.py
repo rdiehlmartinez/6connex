@@ -6,6 +6,7 @@ Model.
 '''
 
 import numpy as np
+import random
 import pickle
 from torch.utils.data import Dataset
 from PIL import Image
@@ -18,17 +19,18 @@ class MoleType(Enum):
     malignant = 1 
     indeterminate = 2 
  
- 
 class ImageDataset(): 
-    def __init__(self, path = 'cleaned_data.pkl'):
+    def __init__(self, path = 'cleaned_data.pkl', shuffle = True):
+                       
         """
         Args:
             path (string): Path to the .pkl file that contains all the 
             data 
         """
+        self.shuffle = shuffle 
+        
         self.path = path
         self.dataset = self.extract_info() # list of matrices
-        self.validation = False
         self.lookup = MoleType
         self.trans = transforms.ToTensor()
         self.resize = transforms.Resize((144,192))
@@ -42,12 +44,10 @@ class ImageDataset():
         
     def __getitem__(self,idx):
         img_path, label = self.dataset[idx] 
-        #resized_image = self.resize(Image.open(img_path))
-        #resized_image.save("resized_example.png")
-        #img = cv2.resize(cv2.imread(img_path),(144,192))
         
-        
+        # Applying Transformation to image
         img = self.trans(self.resize(Image.open(img_path)))
+
         try: 
             label = self.lookup[label].value
         except:
@@ -56,9 +56,11 @@ class ImageDataset():
         return img, label 
         
     def extract_info(self): 
-        return pickle.load(open(self.path,'rb'))
-         
- 
+        full_data = pickle.load(open(self.path,'rb'))
+        if self.shuffle: 
+            random.shuffle(full_data)
+        return full_data
+
 def main(): 
     print('--- Running Test for ImageDataset class ---')
     dataset = ImageDataset()

@@ -1,7 +1,8 @@
 __author__ = 'Richard Diehl Martinez' 
 
 '''
-Establishes the basic CNN model for classification of 
+Establishes the basic training process 
+which which to train the model for classification of 
 images into benign/malignant/indeterminant.
 '''
 
@@ -12,13 +13,19 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms as T
 from torch.utils.data import DataLoader
-from torch.utils.data.sampler import RandomSampler
+from torch.utils.data.sampler import SubsetRandomSampler, RandomSampler
 import torch.nn.functional as F
 import numpy as np
 
 
 class Model(): 
     def __init__(self,dtype = torch.float32, device = torch.device('cpu')): 
+         """
+        Model to initialize the training of the convolutional neural network. 
+        @ Arguments: 
+            dtype: type of the values used in the model 
+            device: device to store the model on, default(cpu)
+        """
         
         # Config Training
         self.dtype = dtype
@@ -27,6 +34,9 @@ class Model():
         self.device = device 
         self.gpu = False 
         self.batch_size = 128
+        
+        # Split Between Training and Validation Datasets
+        self.split_prop = 0.9
 
         # Config Model
         self.num_outputs = 3
@@ -53,40 +63,56 @@ class Model():
     def get_dataset(self, path ='cleaned_data.pkl'):
         dataset = ImageDataset(path)
         N = len(dataset)
+        self.split_index = int(N*self.split_prop)
         print("Successfully Loaded Dataset, With {} Examples Total".format(N))
-        return dataset, N
+        return dataset
 
-    def get_batcher(self, dataset):
-        sampler = RandomSampler(dataset)
+    def get_batcher(self, dataset, eval = False):
+        if eval: 
+            sampler = SubsetRandomSampler(np.arange(self.split_index, len(dataset)))
+        else: 
+            sampler = SubsetRandomSampler(np.arange(self.split_index))
         batcher = DataLoader(dataset,sampler=sampler,batch_size=self.batch_size)
         return batcher
         
-    def train(self):
+    def train(self, eval = True):
+        """
+        Trains the model using the config values passed into the model. If the 
+        validation flag is set to true, prints out the validation loss and 
+        training loss. The validation loss is only printed out after 
+        every epoch. 
+        
+        The model uses: 
+            - Cross Entropy Loss with a final softmax layer 
+            - Adam Optimizer is used with default beta parameters and 
+              user specified learning rate  
+        """
+        
         self.model = self.model.to(device = self.device)
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),lr=self.lr)
-        dataset, N = self.get_dataset()
+        dataset = self.get_dataset()
         training_batcher = self.get_batcher(dataset)
         global_iteration = 0
         prev_loss = None
         
+        if self.verbose:
+            print_every = 2
+        else:
+            print_every = 10
+        
         for epoch in range(self.num_epochs):
             print("Entering epoch number: {}".format(epoch))
             avg_loss = torch.tensor([0.0]).to(device=self.device)
-            predictions, output_labels = None, None
+
+            self.model = self.model.train() 
             for iteration, batch in enumerate(training_batcher):
-                
-                ''' 
-                # Uncomment to check size of batches 
-                print(len(batch))
-                print(batch[0].shape)
-                print(batch[1].shape)
-                exit() 
-                '''
-                
                 
                 global_iteration += 1 
                 
                 inputs, labels = batch
+                
+                # Normalizing Inputs over Batch 
+                
                 optimizer.zero_grad()
                 outputs = self.model(inputs)
                 
@@ -94,11 +120,45 @@ class Model():
                 loss.backward()
                 optimizer.step()
 
-                if(global_iteration % 1 == 0):
+                if(global_iteration % print_every == 0):
                     loss = loss.item()
                     print('Iteration %d, Loss = %.4f' % (global_iteration,loss))
+                    
+            if eval: 
+                # Evaluating the validation performance of the model
+                self.model = self.model.eval()
+                validation_batcher = self.get_batcher(dataset, eval = True)
+                for iteration, batch in enumerate(training_batcher):
+                    inputs, labels = batch
+                    predictions = model(input)
                 
         print('Finished Training')
+        
+    def accuracy(self,predictions, labels): 
+        '''
+        Returns the accuracy over a batch of predictions and labels. 
+        @args
+        predictions (3 dimensional matrix): output unnormalized probs of the model 
+        labels (1 dimensional matrix): correct label for the dataset 
+        @returns (scalar): averaged accuracy over the batch
+        '''
+        print(predictions.shape)
+    
+        
+    def predict(self, input, eval=False):
+        """
+        Performs inference. 
+        @args
+        input_image (tensor): A tensor of size (N, C, H, W), representing a batch of images
+                              to perform inference on.
+        @returns
+        A tensor of size (N, 3), representing the predicted label
+        """
+
+        model = self.model.to(device = self.device)
+        input = input.to(device=self.device,dtype=self.dtype)
+        predictions = model(input)
+        return predictions
 
 
 def main():
