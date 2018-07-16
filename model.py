@@ -17,6 +17,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 import torch.nn.functional as F
 import numpy as np
 import argparse
+import shutil
 
 class Model(): 
     def __init__(self, lr, batch_size, split_prop = 0.9, verbose = False, dtype = torch.float32): 
@@ -36,7 +37,7 @@ class Model():
         self.batch_size = batch_size
         self.verbose = verbose # Boolean 
         self.dtype = dtype 
-        self.num_epochs = 30 
+        self.num_epochs = 25
         
         # Split Between Training and Validation Datasets
         self.split_prop = split_prop
@@ -60,9 +61,16 @@ class Model():
             self.device = torch.device('cpu')                  
             
     def trainable_parameters(self):
+        '''
+        Helper function to print out the number of parameters in our model.
+        '''
         return sum(parameter.numel() for parameter in self.model.parameters() if parameter.requires_grad)
         
     def get_dataset(self, path ='cleaned_data.pkl'):
+        '''
+        Returns a dataset object, which we define in the dataset.py 
+        file.  
+        '''
         dataset = ImageDataset(path)
         N = len(dataset)
         self.split_index = int(N*self.split_prop)
@@ -70,6 +78,25 @@ class Model():
         return dataset
 
     def get_batcher(self, dataset, eval = False):
+        """
+        Returns a 'batcher' to the training subroutine which 
+        trains the machine learning model. Notice that this batcher
+        is simply a PyTorch DataLoader Object. We pass into this 
+        dataloader both the dataset (which is a class we define) and 
+        a sampler. The sampler is another object which informs the 
+        dataloader how it should sample batches from the dataset. 
+        
+        By specifying that the sampler should only sample form certain
+        indices of the dataset, we can effectively create a training-validation
+        split of our data.
+        
+        @args: 
+            dataset (ImageDataset) 
+        @returns:
+            batcher (DataLoader)
+            
+        
+        """
         if eval: 
             sampler = SubsetRandomSampler(np.arange(self.split_index, len(dataset)))
         else: 
@@ -78,6 +105,13 @@ class Model():
         return batcher
 
     def normalize_batch(self, inputs):
+        '''
+        Normalizes the batch inputs in the training process. 
+        @args: 
+            Unnormalized Images
+        @returns:
+            Normalized images 
+        '''
         inputs -= inputs.mean(dim=0,keepdim=True)
         inputs /= inputs.std(dim=0,keepdim=True)
         return inputs
@@ -96,6 +130,7 @@ class Model():
         """
         
         self.model = self.model.to(device = self.device)
+        print('Training model with {} parameters'.format(str(self.trainable_parameters())))
         eval = (self.split_prop < 1)
 
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),lr=self.lr)
@@ -141,36 +176,63 @@ class Model():
                     accuracy = self.accuracy(outputs,labels)
                     if(accuracy > best_train_acc): 
                         best_train_acc = accuracy
-                        self.save_checkpoint(accuracy)
-                    print('Iteration %d, Loss = %.4f, Accuracy = %.4f' % (global_iteration,loss, accuracy))
+                    print('Global iteration %d, Loss = %.4f, Training Accuracy = %.4f' % (global_iteration,loss, accuracy))
                     
             if eval: 
                 # Evaluating the validation performance of the model
                 self.model = self.model.eval()
+                curr_val_acc = 0 
                 for iteration, batch in enumerate(validation_batcher):
                     inputs, labels = batch
-                    predictions = self.model(input)
-                    accuracy = self.accuracy(predictions,labels)
-                    print('Epoch %d, Validation Accuracy = %.4f' % (epoch,accuracy))
-                    
-                    if(accuracy > best_val_acc): 
-                        best_val_acc = accuracy
-                        self.save_checkpoint(accuracy)
+                    predictions = self.model(inputs).to(device = self.device)
+                    curr_val_acc += self.accuracy(predictions,labels)
+                
+                curr_val_acc /= (iteration+1) # Number of batch iterations 
+                print('Epoch %d, Validation Accuracy = %.4f' % (epoch,curr_val_acc))
+                if(curr_val_acc > best_val_acc):
+                    print('New Best Validation Accuracy!') 
+                    best_val_acc = curr_val_acc
+                    self.save_model_params(self.model,curr_val_acc)
                         
         print('Model Finished Training')
         
-    def save_checkpoint(self, accuracy): 
+        
+    def save_model_params(self, model, accuracy): 
         '''
-        Returns the accuracy over a batch of predictions and labels. 
-        @args
-        predictions (3 dimensional matrix): output unnormalized probs of the model 
-        labels (1 dimensional matrix): correct label for the dataset 
-        @returns (scalar): averaged accuracy over the batch
+        Saves out the model parameters only. Call on this method if the model 
+        should only be used for future predictions (such as for demos). 
+        @args: 
+            model (ClassificationModel): the model whose parameters should be saved 
         '''
-    
-        print('New best validation accuracy, saving file')
-        name = 'acc_' + str(accuracy)
-        torch.save(self.model.state_dict(),"checkpoints/{}.parameters".format(str(accuracy)))
+        print('Saving Model parameters')
+        file_name = "saved_models/acc_{}.pt".format(str(accuracy))
+        torch.save(model.state_dict(), file_name)
+        
+    def save_checkpoint(self, state, is_best=False): 
+        '''
+        Saves a checkpoint of the model which can be used to continue training of the 
+        model. The model should only be saved in this format if we hope to continue 
+        training the model. This method is more comprehensive than the save_model_param
+        method.
+        @args:
+            state (dictionary): A state dictionary should be passed in which 
+            contains the following values
+                {
+                    epoch: current Epoch 
+                    state_dict: current state of the model parameters
+                    optimizer: optimizer used for training 
+                    best_acc: current best validation accuracy 
+                }
+                
+            is_best (boolean): boolean to determine if the current model is the best so far
+        
+        '''
+        file_name = "checkpoints/acc_{}.pth.tar".format(str(state['best_acc']))
+        torch.save(state,file_name)
+        if(is_best): 
+            print('New best validation accuracy, saving file')
+            shutil.copyfile(file_name, 'model_best.pth.tar')
+        
         
     def accuracy(self,predictions, labels): 
         '''
@@ -184,6 +246,7 @@ class Model():
         N = float(predicted_indices.shape[0])
         accuracy = torch.sum(predicted_indices == labels).item()/N
         return accuracy
+        
         
     def predict(self, input, eval=False):
         """
@@ -210,6 +273,7 @@ def main():
     parser.add_argument("-v", "--verbose", help='set flag to print out model results every iteration; otherwise printed out every 5 iterations', action="store_true")
     parser.add_argument("-split_prop", "--split_prop", help='specify the proportion of data to split into training/test set, defaulted to 0.9', type = float, action="store", default=0.9)
     args = parser.parse_args()
+    assert(args.lr is not None and args.bs is not None)
         
     model = Model(args.lr, args.bs, split_prop = args.split_prop, verbose = args.verbose)
     model.train()

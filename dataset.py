@@ -55,10 +55,38 @@ class ImageDataset():
             exit()
         return img, label 
         
-    def extract_info(self): 
+    def extract_info(self, test_set = True, over_sample = True): 
+        '''
+        Extracts the dataset to be fed into the training 
+        model. This dataset is in the form of a pickle 
+        file that maps image file locations with their respective
+        labels.
+        
+        This method can also create a small test_set to 
+        attempt overfitting data. 
+        
+        
+        Returns: 
+            - List of file paths and their corresponding labels
+        '''
+        
         full_data = pickle.load(open(self.path,'rb'))
+        
+        
+        if over_sample:
+            new_full_data = [] 
+            for data in full_data: 
+                new_full_data.append(data)
+                if data[1] == 'malignant': 
+                    new_full_data.append(data)
+            full_data = new_full_data
+                
         if self.shuffle: 
             random.shuffle(full_data)
+            
+        if test_set: 
+            return full_data[:200]
+            
         return full_data
 
 def main(): 
